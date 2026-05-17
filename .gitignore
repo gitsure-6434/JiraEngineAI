@@ -1,0 +1,23 @@
+.idea/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+.vscode/
+
+.env
+.env.local
+*.env
+
+.DS_Store
+
+# Backend (Maven)
+backend/target/
+
+# Frontend (future)
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.next/

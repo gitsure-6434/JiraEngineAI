@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: jira-analyzer
+
+server:
+  port: ${SERVER_PORT:8080}
+
+jira:
+  base-url: ${JIRA_BASE_URL:https://redaksh.atlassian.net}
+  email: ${JIRA_EMAIL:sucharit227@gmail.com}
+  api-token: ${JIRA_API_TOKEN:JIRA_API_TOKEN=ATATT3xFfGF0hl7t65jY4JCRWcB8gdybVLojeG0BUWGQdV1IqnpdH1vyNrZcrjw5OFUA3yPvEwdzPmxTiONRhB7FFM9UcIHgFKPHta1PEOioNts4oPkKRPjJdOfToeO_K_Ob3A6Vqvnz7plnb0eezEZyJaswv0ONGpI-zJ4pBRxFlH376vx3-0k=7B7CEF15}
+
+ollama:
+  base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+  chat-model: ${OLLAMA_CHAT_MODEL:llama3.1}
+  embedding-model: ${OLLAMA_EMBEDDING_MODEL:nomic-embed-text}
+  connect-timeout-ms: 10000
+  read-timeout-ms: 120000
+
+qdrant:
+  base-url: ${QDRANT_BASE_URL:http://localhost:6333}
+  issues-collection: jira_issues
+  search-cache-collection: search_cache
+  vector-size: ${QDRANT_VECTOR_SIZE:768}
+  cache-similarity-threshold: ${QDRANT_CACHE_THRESHOLD:0.92}
+  top-k-default: 5
+
+logging:
+  level:
+    root: INFO
+    com.jira.backend: DEBUG
