@@ -13,8 +13,10 @@
 
 .DS_Store
 
-# Backend (Maven)
+# Maven
+target/
 backend/target/
+frontend/target/
 
 # Frontend (future)
 frontend/node_modules/

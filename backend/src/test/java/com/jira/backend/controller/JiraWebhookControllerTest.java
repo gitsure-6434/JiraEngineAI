@@ -35,7 +35,7 @@ class JiraWebhookControllerTest {
     void returnsWebhookInfo() throws Exception {
         mockMvc.perform(get("/api/v1/jira/webhook"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.webhookUrl").value("http://localhost/api/v1/jira/webhook"))
+                .andExpect(jsonPath("$.webhookUrl").value("http://localhost:8989/api/v1/jira/webhook"))
                 .andExpect(jsonPath("$.method").value("POST"))
                 .andExpect(jsonPath("$.syncProjectKey").value("SCRUM"))
                 .andExpect(jsonPath("$.jqlFilterHint").value("project = SCRUM"));

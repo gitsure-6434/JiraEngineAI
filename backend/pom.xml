@@ -5,21 +5,15 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.4.5</version>
-        <relativePath/>
+        <groupId>com.jira</groupId>
+        <artifactId>jira-engine-ai</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <groupId>com.jira</groupId>
-    <artifactId>jira-analyzer</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
-    <name>jira-analyzer</name>
-    <description>AI Jira triage with Ollama and Qdrant</description>
-
-    <properties>
-        <java.version>17</java.version>
-    </properties>
+    <artifactId>jira-backend</artifactId>
+    <name>jira-backend</name>
+    <description>Spring Boot API for Jira analyze, ingest, and webhooks</description>
 
     <dependencies>
         <dependency>
