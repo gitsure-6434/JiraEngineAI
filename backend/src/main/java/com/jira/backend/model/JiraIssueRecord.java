@@ -12,6 +12,8 @@ public class JiraIssueRecord {
     private final String description;
     private final String status;
     private final String resolution;
+    @lombok.Builder.Default
+    private final String comments = "";
 
     public String toIndexableText() {
         return """
@@ -20,12 +22,14 @@ public class JiraIssueRecord {
                 Status: %s
                 Resolution: %s
                 Description: %s
+                Comments: %s
                 """.formatted(
                 ticketId,
                 nullToEmpty(title),
                 nullToEmpty(status),
                 nullToEmpty(resolution),
-                nullToEmpty(description));
+                nullToEmpty(description),
+                nullToEmpty(comments));
     }
 
     private static String nullToEmpty(String value) {

@@ -10,11 +10,13 @@ public interface VectorIndexPort {
 
     void indexIssue(JiraIssueRecord issue);
 
-    List<SimilarIssueDto> findSimilarIssues(List<Float> queryVector, int topK);
+    List<SimilarIssueDto> findSimilarIssues(List<Float> queryVector, String queryText, int topK);
 
     AnalyzeResponseDto findCachedAnalysis(List<Float> queryVector);
 
     void cacheAnalysis(String normalizedQuery, List<Float> queryVector, AnalyzeResponseDto response);
+
+    void invalidateCacheForTicket(String ticketId);
 
     List<Float> embedText(String text);
 }

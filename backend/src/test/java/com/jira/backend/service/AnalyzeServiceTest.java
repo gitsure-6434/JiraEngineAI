@@ -77,7 +77,7 @@ class AnalyzeServiceTest {
 
         when(vectorIndexPort.embedText(anyString())).thenReturn(List.of(0.5f, 0.6f));
         when(vectorIndexPort.findCachedAnalysis(any())).thenReturn(null);
-        when(vectorIndexPort.findSimilarIssues(any(), anyInt())).thenReturn(List.of(
+        when(vectorIndexPort.findSimilarIssues(any(), anyString(), anyInt())).thenReturn(List.of(
                 SimilarIssueDto.builder()
                         .ticketId("PROJ-07")
                         .title("Login NPE")
@@ -102,5 +102,32 @@ class AnalyzeServiceTest {
         assertThat(response.getRecommendedCodePatch()).contains("IllegalArgumentException");
         assertThat(response.isFromCache()).isFalse();
         verify(vectorIndexPort).cacheAnalysis(anyString(), any(), any());
+    }
+
+    @Test
+    void returnsOnlyLlmRelatedTicketsInSimilarIssues() {
+        AnalyzeRequestDto request = new AnalyzeRequestDto();
+        request.setText("OAuth refresh returns 401");
+
+        when(vectorIndexPort.embedText(anyString())).thenReturn(List.of(0.5f, 0.6f));
+        when(vectorIndexPort.findCachedAnalysis(any())).thenReturn(null);
+        when(vectorIndexPort.findSimilarIssues(any(), anyString(), anyInt())).thenReturn(List.of(
+                SimilarIssueDto.builder().ticketId("SCRUM-5").title("OAuth 401").similarityScore(0.91).build(),
+                SimilarIssueDto.builder().ticketId("SCRUM-3").title("Other").similarityScore(0.76).build(),
+                SimilarIssueDto.builder().ticketId("SCRUM-1").title("Unrelated").similarityScore(0.75).build()));
+        when(ollamaPort.chat(anyString())).thenReturn("""
+                {
+                  "rootCauseSummary": "Token refresh bug",
+                  "recommendedFix": "Fix refresh handler",
+                  "recommendedCodePatch": "",
+                  "reproductionSteps": [],
+                  "relatedTicketIds": ["SCRUM-5"]
+                }
+                """);
+
+        AnalyzeResponseDto response = analyzeService.analyze(request);
+
+        assertThat(response.getRelatedTicketIds()).containsExactly("SCRUM-5");
+        assertThat(response.getSimilarIssues()).extracting(SimilarIssueDto::getTicketId).containsExactly("SCRUM-5");
     }
 }

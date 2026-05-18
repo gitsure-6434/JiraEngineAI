@@ -1,18 +1,29 @@
 spring:
   application:
     name: jira-analyzer
+  config:
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:../.env[.properties]
+      - optional:file:.env.example[.properties]
+      - optional:file:../.env.example[.properties]
 
 server:
-  port: ${SERVER_PORT:8080}
+  port: ${SERVER_PORT:8989}
 
 jira:
-  base-url: ${JIRA_BASE_URL:https://redaksh.atlassian.net}
-  email: ${JIRA_EMAIL:sucharit227@gmail.com}
-  api-token: ${JIRA_API_TOKEN:JIRA_API_TOKEN=ATATT3xFfGF0hl7t65jY4JCRWcB8gdybVLojeG0BUWGQdV1IqnpdH1vyNrZcrjw5OFUA3yPvEwdzPmxTiONRhB7FFM9UcIHgFKPHta1PEOioNts4oPkKRPjJdOfToeO_K_Ob3A6Vqvnz7plnb0eezEZyJaswv0ONGpI-zJ4pBRxFlH376vx3-0k=7B7CEF15}
+  base-url: ${JIRA_BASE_URL:}
+  email: ${JIRA_EMAIL:}
+  api-token: ${JIRA_API_TOKEN:}
+  sync-project-key: ${JIRA_SYNC_PROJECT_KEY:SCRUM}
+  webhook-secret: ${JIRA_WEBHOOK_SECRET:}
+
+app:
+  public-base-url: ${APP_PUBLIC_BASE_URL:}
 
 ollama:
   base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
-  chat-model: ${OLLAMA_CHAT_MODEL:llama3.1}
+  chat-model: ${OLLAMA_CHAT_MODEL:llama3.2}
   embedding-model: ${OLLAMA_EMBEDDING_MODEL:nomic-embed-text}
   connect-timeout-ms: 10000
   read-timeout-ms: 120000
@@ -23,6 +34,8 @@ qdrant:
   search-cache-collection: search_cache
   vector-size: ${QDRANT_VECTOR_SIZE:768}
   cache-similarity-threshold: ${QDRANT_CACHE_THRESHOLD:0.92}
+  issue-similarity-threshold: ${QDRANT_ISSUE_THRESHOLD:0.55}
+  issue-similarity-fallback-min: ${QDRANT_ISSUE_FALLBACK_MIN:0.40}
   top-k-default: 5
 
 logging:

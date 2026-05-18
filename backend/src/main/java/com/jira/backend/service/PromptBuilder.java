@@ -20,6 +20,10 @@ public final class PromptBuilder {
         return """
                 You are a senior Java Spring Boot engineer performing Jira bug triage.
                 Use the historical issues and user query below.
+                When similar historical issues are provided, base your recommendedFix on their
+                Description, Comments, and Resolution (comments often contain the actual fix).
+                Only include ticket IDs in relatedTicketIds that are truly relevant.
+                Never respond with "No recommended fix found" if a similar issue lists a fix.
 
                 Return ONLY valid JSON with this exact schema:
                 {

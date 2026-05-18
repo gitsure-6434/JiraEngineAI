@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jira.backend.config.QdrantProperties;
 import com.jira.backend.exception.AiServiceException;
 import com.jira.backend.model.VectorSearchResult;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -17,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+@Slf4j
 @Component
 public class QdrantVectorClient {
 
@@ -45,14 +47,34 @@ public class QdrantVectorClient {
         upsertPoint(properties.getSearchCacheCollection(), cacheKey, vector, payload);
     }
 
-    public List<VectorSearchResult> searchIssues(List<Float> vector, int topK) {
+    public List<VectorSearchResult> searchIssues(List<Float> vector, int topK, double minScore) {
         ensureReady();
-        return search(properties.getIssuesCollection(), vector, topK);
+        return search(properties.getIssuesCollection(), vector, topK, minScore);
     }
 
     public List<VectorSearchResult> searchCache(List<Float> vector, int topK) {
         ensureReady();
-        return search(properties.getSearchCacheCollection(), vector, topK);
+        return search(properties.getSearchCacheCollection(), vector, topK, 0.0);
+    }
+
+    public long countIssues() {
+        ensureReady();
+        return countPoints(properties.getIssuesCollection());
+    }
+
+    public List<VectorSearchResult> scrollAllIssues(int limit) {
+        ensureReady();
+        return scrollPoints(properties.getIssuesCollection(), limit, null);
+    }
+
+    public List<VectorSearchResult> scrollAllSearchCache() {
+        ensureReady();
+        return scrollAllPages(properties.getSearchCacheCollection(), 100);
+    }
+
+    public void deleteSearchCachePoints(List<String> pointIds) {
+        ensureReady();
+        deletePoints(properties.getSearchCacheCollection(), pointIds);
     }
 
     private void ensureReady() {
@@ -121,11 +143,14 @@ public class QdrantVectorClient {
         }
     }
 
-    private List<VectorSearchResult> search(String collection, List<Float> vector, int topK) {
-        Map<String, Object> body = Map.of(
-                "vector", vector,
-                "limit", topK,
-                "with_payload", true);
+    private List<VectorSearchResult> search(String collection, List<Float> vector, int topK, double minScore) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("vector", vector);
+        body.put("limit", topK);
+        body.put("with_payload", true);
+        if (minScore > 0.0) {
+            body.put("score_threshold", minScore);
+        }
 
         try {
             JsonNode response = qdrantWebClient.post()
@@ -156,6 +181,113 @@ public class QdrantVectorClient {
             return results;
         } catch (Exception ex) {
             throw new AiServiceException("Vector search failed in collection: " + collection, ex);
+        }
+    }
+
+    private long countPoints(String collection) {
+        try {
+            JsonNode response = qdrantWebClient.get()
+                    .uri("/collections/{name}", collection)
+                    .retrieve()
+                    .bodyToMono(JsonNode.class)
+                    .block();
+            if (response != null && response.path("result").has("points_count")) {
+                return response.path("result").path("points_count").asLong(0);
+            }
+        } catch (Exception ex) {
+            log.warn("Could not read Qdrant collection stats for {}: {}", collection, ex.getMessage());
+        }
+        return 0;
+    }
+
+    private List<VectorSearchResult> scrollAllPages(String collection, int pageSize) {
+        List<VectorSearchResult> all = new ArrayList<>();
+        Object offset = null;
+
+        while (true) {
+            JsonNode response = scrollRaw(collection, pageSize, offset);
+            List<VectorSearchResult> page = mapScrollPoints(response);
+            all.addAll(page);
+
+            if (response == null || !response.path("result").has("next_page_offset")
+                    || response.path("result").get("next_page_offset").isNull()) {
+                break;
+            }
+            offset = objectMapper.convertValue(response.path("result").get("next_page_offset"), Object.class);
+            if (page.isEmpty()) {
+                break;
+            }
+        }
+
+        return all;
+    }
+
+    private JsonNode scrollRaw(String collection, int limit, Object offset) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("limit", limit);
+        body.put("with_payload", true);
+        body.put("with_vector", false);
+        if (offset != null) {
+            body.put("offset", offset);
+        }
+
+        try {
+            return qdrantWebClient.post()
+                    .uri("/collections/{name}/points/scroll", collection)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(body)
+                    .retrieve()
+                    .bodyToMono(JsonNode.class)
+                    .block();
+        } catch (Exception ex) {
+            throw new AiServiceException("Failed to scroll Qdrant collection: " + collection, ex);
+        }
+    }
+
+    private List<VectorSearchResult> scrollPoints(String collection, int limit, Object offset) {
+        try {
+            return mapScrollPoints(scrollRaw(collection, limit, offset));
+        } catch (Exception ex) {
+            throw new AiServiceException("Failed to scroll Qdrant collection: " + collection, ex);
+        }
+    }
+
+    private List<VectorSearchResult> mapScrollPoints(JsonNode response) {
+        if (response == null || !response.path("result").has("points")) {
+            return List.of();
+        }
+
+        List<VectorSearchResult> results = new ArrayList<>();
+        for (JsonNode item : response.path("result").path("points")) {
+            String pointId = item.has("id") ? item.get("id").asText() : UUID.randomUUID().toString();
+            Map<String, Object> payload = objectMapper.convertValue(
+                    item.path("payload"),
+                    objectMapper.getTypeFactory().constructMapType(LinkedHashMap.class, String.class, Object.class));
+            results.add(VectorSearchResult.builder()
+                    .pointId(pointId)
+                    .score(0.0)
+                    .payload(payload)
+                    .build());
+        }
+        return results;
+    }
+
+    private void deletePoints(String collection, List<String> pointIds) {
+        if (pointIds == null || pointIds.isEmpty()) {
+            return;
+        }
+
+        Map<String, Object> body = Map.of("points", pointIds);
+        try {
+            qdrantWebClient.post()
+                    .uri("/collections/{name}/points/delete", collection)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(body)
+                    .retrieve()
+                    .bodyToMono(Void.class)
+                    .block();
+        } catch (Exception ex) {
+            throw new AiServiceException("Failed to delete points from collection: " + collection, ex);
         }
     }
 }

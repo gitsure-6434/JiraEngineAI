@@ -36,6 +36,37 @@ class JiraApiClientTest {
     }
 
     @Test
+    void rejectsJiraErrorMessagesInSearchResponse() throws Exception {
+        String json =
+                """
+                {
+                  "errorMessages": ["Invalid JQL: project = UNKNOWN"],
+                  "issues": []
+                }
+                """;
+
+        var client = new JiraApiClient(null, null);
+        Method method = JiraApiClient.class.getDeclaredMethod(
+                "assertValidSearchResponse", com.fasterxml.jackson.databind.JsonNode.class);
+        method.setAccessible(true);
+
+        var response = objectMapper.readTree(json);
+        org.junit.jupiter.api.Assertions.assertThrows(
+                com.jira.backend.exception.JiraIntegrationException.class,
+                () -> {
+                    try {
+                        method.invoke(client, response);
+                    } catch (java.lang.reflect.InvocationTargetException ex) {
+                        Throwable cause = ex.getCause();
+                        if (cause instanceof RuntimeException runtimeException) {
+                            throw runtimeException;
+                        }
+                        throw new RuntimeException(cause);
+                    }
+                });
+    }
+
+    @Test
     void mapsBulkFetchResponseWithFullFields() throws Exception {
         String json =
                 """

@@ -5,23 +5,27 @@ import com.jira.backend.config.JiraProperties;
 import com.jira.backend.exception.BadRequestException;
 import com.jira.backend.exception.JiraIntegrationException;
 import com.jira.backend.model.JiraIssueRecord;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
-import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
+import org.springframework.web.client.HttpStatusCodeException;
+import org.springframework.web.client.RestTemplate;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
+@Slf4j
 @Component
 public class JiraApiClient implements JiraPort {
 
@@ -30,11 +34,11 @@ public class JiraApiClient implements JiraPort {
     private static final List<String> ISSUE_FIELDS =
             List.of("summary", "description", "status", "resolution");
 
-    private final WebClient jiraWebClient;
+    private final RestTemplate jiraRestTemplate;
     private final JiraProperties properties;
 
-    public JiraApiClient(@Qualifier("jiraWebClient") WebClient jiraWebClient, JiraProperties properties) {
-        this.jiraWebClient = jiraWebClient;
+    public JiraApiClient(@Qualifier("jiraRestTemplate") RestTemplate jiraRestTemplate, JiraProperties properties) {
+        this.jiraRestTemplate = jiraRestTemplate;
         this.properties = properties;
     }
 
@@ -45,10 +49,11 @@ public class JiraApiClient implements JiraPort {
         try {
             List<String> issueRefs = collectIssueRefsFromSearch(jql, maxResults);
             if (issueRefs.isEmpty()) {
+                log.warn("Jira returned 0 issues for jql='{}'", jql);
                 return List.of();
             }
             return bulkFetchIssueDetails(issueRefs);
-        } catch (WebClientResponseException ex) {
+        } catch (HttpStatusCodeException ex) {
             throw new JiraIntegrationException(
                     "Jira search failed: " + ex.getStatusCode() + " - " + ex.getResponseBodyAsString(), ex);
         } catch (Exception ex) {
@@ -81,9 +86,6 @@ public class JiraApiClient implements JiraPort {
         return searchIssues(jql, ticketIds.size());
     }
 
-    /**
-     * Step 1: Enhanced JQL search often returns only internal issue ids (no fields).
-     */
     private List<String> collectIssueRefsFromSearch(String jql, int maxResults) {
         List<String> issueRefs = new ArrayList<>();
         String nextPageToken = null;
@@ -91,12 +93,18 @@ public class JiraApiClient implements JiraPort {
         while (issueRefs.size() < maxResults) {
             int pageSize = Math.min(maxResults - issueRefs.size(), PAGE_SIZE);
             JsonNode response = executeJqlSearch(jql, pageSize, nextPageToken);
-            issueRefs.addAll(extractIssueRefs(response));
+            List<String> pageRefs = extractIssueRefs(response);
+            issueRefs.addAll(pageRefs);
 
-            boolean isLast = !response.has("isLast") || response.path("isLast").asBoolean(true);
+            log.debug("Jira search page: jql='{}', pageSize={}, found={}, isLast={}",
+                    jql, pageSize, pageRefs.size(), response.path("isLast").asBoolean(false));
+
             nextPageToken = readNextPageToken(response);
+            boolean isLast = response.has("isLast")
+                    ? response.path("isLast").asBoolean(false)
+                    : !StringUtils.hasText(nextPageToken);
 
-            if (isLast || !StringUtils.hasText(nextPageToken)) {
+            if (isLast) {
                 break;
             }
         }
@@ -104,9 +112,6 @@ public class JiraApiClient implements JiraPort {
         return issueRefs.size() > maxResults ? issueRefs.subList(0, maxResults) : issueRefs;
     }
 
-    /**
-     * Step 2: Load full issue payloads (summary, description, status, resolution).
-     */
     private List<JiraIssueRecord> bulkFetchIssueDetails(List<String> issueRefs) {
         List<JiraIssueRecord> records = new ArrayList<>();
 
@@ -128,15 +133,9 @@ public class JiraApiClient implements JiraPort {
             body.put("nextPageToken", nextPageToken);
         }
 
-        return jiraWebClient.post()
-                .uri("/rest/api/3/search/jql")
-                .header(HttpHeaders.AUTHORIZATION, basicAuthHeader())
-                .header(HttpHeaders.ACCEPT, "application/json")
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(body)
-                .retrieve()
-                .bodyToMono(JsonNode.class)
-                .block();
+        JsonNode response = postJson("/rest/api/3/search/jql", body);
+        assertValidSearchResponse(response);
+        return response;
     }
 
     private JsonNode executeBulkFetch(List<String> issueIdsOrKeys) {
@@ -145,19 +144,23 @@ public class JiraApiClient implements JiraPort {
         body.put("fields", ISSUE_FIELDS);
         body.put("fieldsByKeys", false);
 
-        return jiraWebClient.post()
-                .uri("/rest/api/3/issue/bulkfetch")
-                .header(HttpHeaders.AUTHORIZATION, basicAuthHeader())
-                .header(HttpHeaders.ACCEPT, "application/json")
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(body)
-                .retrieve()
-                .bodyToMono(JsonNode.class)
-                .block();
+        return postJson("/rest/api/3/issue/bulkfetch", body);
+    }
+
+    private JsonNode postJson(String path, Map<String, Object> body) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setAccept(List.of(MediaType.APPLICATION_JSON));
+        headers.setBasicAuth(properties.getEmail(), properties.getApiToken(), StandardCharsets.UTF_8);
+
+        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
+        ResponseEntity<JsonNode> response = jiraRestTemplate.exchange(
+                path, HttpMethod.POST, entity, JsonNode.class);
+        return response.getBody();
     }
 
     private List<String> extractIssueRefs(JsonNode response) {
-        if (response == null || !response.has("issues")) {
+        if (response == null || !response.has("issues") || !response.get("issues").isArray()) {
             return List.of();
         }
 
@@ -181,9 +184,56 @@ public class JiraApiClient implements JiraPort {
 
         List<JiraIssueRecord> records = new ArrayList<>();
         for (JsonNode issue : response.get("issues")) {
-            records.add(mapIssueNode(issue));
+            records.add(enrichWithComments(mapIssueNode(issue)));
         }
         return records;
+    }
+
+    private JiraIssueRecord enrichWithComments(JiraIssueRecord record) {
+        if (!StringUtils.hasText(record.getTicketId())) {
+            return record;
+        }
+        try {
+            String comments = fetchCommentText(record.getTicketId());
+            return JiraIssueRecord.builder()
+                    .ticketId(record.getTicketId())
+                    .title(record.getTitle())
+                    .description(record.getDescription())
+                    .status(record.getStatus())
+                    .resolution(record.getResolution())
+                    .comments(comments)
+                    .build();
+        } catch (Exception ex) {
+            log.warn("Could not load comments for {}: {}", record.getTicketId(), ex.getMessage());
+            return record;
+        }
+    }
+
+    private String fetchCommentText(String issueKey) {
+        JsonNode response = getJson("/rest/api/3/issue/" + issueKey + "/comment");
+        if (response == null || !response.has("comments") || !response.get("comments").isArray()) {
+            return "";
+        }
+        StringBuilder combined = new StringBuilder();
+        for (JsonNode comment : response.get("comments")) {
+            String text = extractDescription(comment.path("body"));
+            if (StringUtils.hasText(text)) {
+                if (!combined.isEmpty()) {
+                    combined.append("\n---\n");
+                }
+                combined.append(text);
+            }
+        }
+        return combined.toString();
+    }
+
+    private JsonNode getJson(String path) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setAccept(List.of(MediaType.APPLICATION_JSON));
+        headers.setBasicAuth(properties.getEmail(), properties.getApiToken(), StandardCharsets.UTF_8);
+        ResponseEntity<JsonNode> response = jiraRestTemplate.exchange(
+                path, HttpMethod.GET, new HttpEntity<>(headers), JsonNode.class);
+        return response.getBody();
     }
 
     private JiraIssueRecord mapIssueNode(JsonNode issue) {
@@ -236,15 +286,32 @@ public class JiraApiClient implements JiraPort {
     }
 
     private void validateConfiguration() {
+        if (properties.getApiToken() != null && properties.getApiToken().startsWith("JIRA_API_TOKEN=")) {
+            throw new BadRequestException(
+                    "JIRA_API_TOKEN looks misconfigured (includes 'JIRA_API_TOKEN=' prefix). "
+                            + "Set the env var to the token value only, e.g. copy from .env.example.");
+        }
         if (!properties.isConfigured()) {
             throw new BadRequestException(
-                    "Jira is not configured. Set JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables.");
+                    "Jira is not configured. Copy .env.example to .env in the project root (or set "
+                            + "JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN), then restart the app.");
         }
     }
 
-    private String basicAuthHeader() {
-        String credentials = properties.getEmail() + ":" + properties.getApiToken();
-        String encoded = Base64.getEncoder().encodeToString(credentials.getBytes(StandardCharsets.UTF_8));
-        return "Basic " + encoded;
+    private void assertValidSearchResponse(JsonNode response) {
+        if (response == null) {
+            throw new JiraIntegrationException("Jira search returned an empty response body");
+        }
+        if (response.has("errorMessages") && response.get("errorMessages").isArray()) {
+            List<String> errors = new ArrayList<>();
+            response.get("errorMessages").forEach(node -> errors.add(node.asText()));
+            if (!errors.isEmpty()) {
+                throw new JiraIntegrationException("Jira search failed: " + String.join("; ", errors));
+            }
+        }
+        if (response.has("warningMessages") && response.get("warningMessages").isArray()) {
+            response.get("warningMessages").forEach(node ->
+                    log.warn("Jira search warning: {}", node.asText()));
+        }
     }
 }

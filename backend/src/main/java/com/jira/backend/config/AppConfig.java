@@ -4,15 +4,35 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
+import org.springframework.web.client.RestTemplate;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.netty.http.client.HttpClient;
 
 import java.time.Duration;
 
 @Configuration
-@EnableConfigurationProperties({JiraProperties.class, OllamaProperties.class, QdrantProperties.class})
+@EnableAsync
+@EnableConfigurationProperties({
+        AppProperties.class,
+        JiraProperties.class,
+        OllamaProperties.class,
+        QdrantProperties.class})
 public class AppConfig {
+
+    @Bean(name = "jiraWebhookExecutor")
+    ThreadPoolTaskExecutor jiraWebhookExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(100);
+        executor.setThreadNamePrefix("jira-webhook-");
+        executor.initialize();
+        return executor;
+    }
 
     @Bean
     ObjectMapper objectMapper() {
@@ -36,10 +56,10 @@ public class AppConfig {
                 .build();
     }
 
-    @Bean("jiraWebClient")
-    WebClient jiraWebClient(JiraProperties properties) {
-        return WebClient.builder()
-                .baseUrl(normalizeBaseUrl(properties.getBaseUrl()))
+    @Bean("jiraRestTemplate")
+    RestTemplate jiraRestTemplate(JiraProperties properties) {
+        return new RestTemplateBuilder()
+                .rootUri(normalizeBaseUrl(properties.getBaseUrl()))
                 .build();
     }
 
