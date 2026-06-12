@@ -63,10 +63,12 @@ public class AppConfig {
                 .build();
     }
 
+        //normalizing base url
     private static String normalizeBaseUrl(String baseUrl) {
         if (baseUrl == null || baseUrl.isBlank()) {
             return "http://localhost";
-        }
+        } else 
+        
         return baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
     }
 }
