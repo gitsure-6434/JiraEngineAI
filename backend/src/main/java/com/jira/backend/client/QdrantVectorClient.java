@@ -178,6 +178,8 @@ public class QdrantVectorClient {
                         .payload(payload)
                         .build());
             }
+
+            log.info("Adding additional logs to test PR Reviews");
             return results;
         } catch (Exception ex) {
             throw new AiServiceException("Vector search failed in collection: " + collection, ex);
