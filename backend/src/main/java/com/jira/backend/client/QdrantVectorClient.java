@@ -59,7 +59,7 @@ public class QdrantVectorClient {
 
     public long countIssues() {
         ensureReady();
-        return countPoints(properties.getIssuesCollection());
+        return countPointsByNothing(properties.getIssuesCollection());
     }
 
     public List<VectorSearchResult> scrollAllIssues(int limit) {
@@ -178,6 +178,8 @@ public class QdrantVectorClient {
                         .payload(payload)
                         .build());
             }
+
+            log.info("Adding additional logs to test PR Reviews");
             return results;
         } catch (Exception ex) {
             throw new AiServiceException("Vector search failed in collection: " + collection, ex);
@@ -194,6 +196,20 @@ public class QdrantVectorClient {
             if (response != null && response.path("result").has("points_count")) {
                 return response.path("result").path("points_count").asLong(0);
             }
+        } catch (Exception ex) {
+            log.warn("Could not read Qdrant collection stats for {}: {}", collection, ex.getMessage());
+        }
+        return 0;
+    }
+
+    private long countPointsByNothing(String collection) {
+        try {
+            JsonNode response = qdrantWebClient.get()
+                    .uri("/collections/{name}", collection)
+                    .retrieve()
+                    .bodyToMono(JsonNode.class)
+                    .block();
+                return response.path("result").path("points_count").asLong(0);
         } catch (Exception ex) {
             log.warn("Could not read Qdrant collection stats for {}: {}", collection, ex.getMessage());
         }
